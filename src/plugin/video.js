@@ -1,4 +1,4 @@
-import ytdl from '@distube/ytdl-core';
+import fetch from 'node-fetch';
 import yts from 'yt-search';
 
 const video = async (m, Matrix) => {
@@ -15,77 +15,45 @@ const video = async (m, Matrix) => {
     try {
       await m.React("🕘");
 
-      const isUrl = ytdl.validateURL(text);
-      await m.React("⬇️");
-
-      const sendVideoMessage = async (videoInfo, finalVideoBuffer) => {
-        if (cmd === 'ytmp4doc') {
-          const docMessage = {
-            document: finalVideoBuffer,
-            mimetype: 'video/mp4',
-            fileName: `${videoInfo.title}.mp4`,
-            caption: `> ${videoInfo.title}\n> © Powered by 𝞢𝙏𝞖𝞘𝞦-𝞛𝘿`,
-          };
-          await Matrix.sendMessage(m.from, docMessage, { quoted: m });
-        } else {
-          const videoMessage = {
-            video: finalVideoBuffer,
-            mimetype: 'video/mp4',
-            caption: `> ${videoInfo.title}\n> © POWERED BY 𝞢𝙏𝞖𝞘𝞦-𝞛𝘿`,
-          };
-          await Matrix.sendMessage(m.from, videoMessage, { quoted: m });
-        }
+      const sendVideoMessage = async (videoDetails, videoBuffer) => {
+        const messageContent = {
+          [cmd === 'ytmp4doc' ? 'document' : 'video']: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `${videoDetails.title}.mp4`,
+          caption: `> ${videoDetails.title}\n> © Powered by 𝞢𝙏𝞖𝞘𝞦-𝞛𝘿`,
+        };
+        await Matrix.sendMessage(m.from, messageContent, { quoted: m });
         await m.React("✅");
       };
 
+      const fetchVideoBuffer = async (url) => {
+        const response = await fetch(url);
+        return response.buffer();
+      };
+
+      const isUrl = /^https?:\/\/(www\.)?youtube\.com\/watch\?v=/.test(text);
+      let videoInfo;
+
       if (isUrl) {
-        const videoStream = ytdl(text, { filter: 'audioandvideo', quality: 'highest' });
-        const videoBuffer = [];
-
-        videoStream.on('data', (chunk) => {
-          videoBuffer.push(chunk);
-        });
-
-        videoStream.on('end', async () => {
-          try {
-            const finalVideoBuffer = Buffer.concat(videoBuffer);
-            const videoInfo = await yts({ videoId: ytdl.getURLVideoID(text) });
-            await sendVideoMessage(videoInfo, finalVideoBuffer);
-          } catch (err) {
-            console.error('Error sending video:', err);
-            m.reply('Error sending video.');
-            await m.React("❌");
-          }
-        });
+        videoInfo = await yts({ videoId: new URL(text).searchParams.get('v') });
       } else {
         const searchResult = await yts(text);
-        const firstVideo = searchResult.videos[0];
-        await m.React("⬇️");
-
-        if (!firstVideo) {
+        videoInfo = searchResult.videos[0];
+        if (!videoInfo) {
           m.reply('Video not found.');
           await m.React("❌");
           return;
         }
-
-        const videoStream = ytdl(firstVideo.url, { filter: 'audioandvideo', quality: 'highest' });
-        const videoBuffer = [];
-
-        videoStream.on('data', (chunk) => {
-          videoBuffer.push(chunk);
-        });
-
-        videoStream.on('end', async () => {
-          try {
-            const finalVideoBuffer = Buffer.concat(videoBuffer);
-            await sendVideoMessage(firstVideo, finalVideoBuffer);
-          } catch (err) {
-            console.error('Error sending video:', err);
-            m.reply('Error sending video.');
-            await m.React("❌");
-          }
-        });
       }
+
+      const apiUrl = `https://matrix-serverless-api.vercel.app/api/ytdl?url=${encodeURIComponent(videoInfo.url)}&type=video`;
+
+      const apiResponse = await fetch(apiUrl);
+      const { videoDetails, videoURL } = await apiResponse.json();
+
+      const videoBuffer = await fetchVideoBuffer(videoURL);
+      await sendVideoMessage(videoDetails, videoBuffer);
+
     } catch (error) {
       console.error("Error generating response:", error);
       m.reply('An error occurred while processing your request.');
